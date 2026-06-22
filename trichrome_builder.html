@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trichrome Builder</title>
+  <style>
+    :root { color-scheme: light dark; --gap: 14px; }
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; padding: 22px; line-height: 1.35; }
+    h1 { margin: 0 0 8px; font-size: 24px; }
+    p { margin: 0 0 16px; color: #666; }
+    .app { display: grid; grid-template-columns: 360px 1fr; gap: 20px; align-items: start; }
+    .panel { border: 1px solid #aaa5; border-radius: 12px; padding: 16px; background: #8881; }
+    .section { border-top: 1px solid #aaa5; padding-top: 14px; margin-top: 14px; }
+    label { display: block; font-weight: 650; margin: 10px 0 5px; }
+    input[type="file"] { width: 100%; }
+    input[type="range"] { width: 100%; }
+    input[type="number"] { width: 80px; }
+    .row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+    .small { font-size: 12px; color: #777; }
+    button { border: 1px solid #7778; border-radius: 10px; padding: 10px 12px; font-weight: 700; cursor: pointer; background: Canvas; color: CanvasText; }
+    button.primary { width: 100%; margin-top: 12px; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .canvasWrap { overflow: auto; max-height: calc(100vh - 76px); border: 1px solid #aaa5; border-radius: 12px; padding: 12px; background: #8881; }
+    canvas { display: block; max-width: 100%; height: auto; image-rendering: auto; background: #222; }
+    .layerName { font-size: 16px; margin-top: 0; }
+    .blue { color: #2676ff; }
+    .red { color: #d92626; }
+    .green { color: #168a3a; }
+    .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .nudgeGrid { display: grid; grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(3, 38px); gap: 6px; justify-content: center; align-items: center; margin-top: 8px; }
+    .nudgeGrid button { padding: 6px; border-radius: 8px; }
+    .nudgeGrid .empty { visibility: hidden; }
+    .inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .inline label { margin: 0; font-weight: 600; }
+    .hintBox { border: 1px solid #aaa5; border-radius: 10px; padding: 10px; background: #8881; margin-top: 10px; }
+    @media (max-width: 900px) { .app { grid-template-columns: 1fr; } .canvasWrap { max-height: none; } }
+  </style>
+</head>
+<body>
+  <h1>Trichrome Builder</h1>
+  <p>Load three B&W scans, map them to RGB channels, align the layers, then export a JPEG.</p>
+
+  <div class="app">
+    <div class="panel">
+      <div>
+        <label class="blue">Blue-filter negative / grayscale image → Blue channel</label>
+        <input id="blueFile" type="file" accept="image/*" />
+        <label class="red">Red-filter negative / grayscale image → Red channel</label>
+        <input id="redFile" type="file" accept="image/*" />
+        <label class="green">Green-filter negative / grayscale image → Green channel</label>
+        <input id="greenFile" type="file" accept="image/*" />
+        <p class="small" style="margin-top:10px">Tip: use positive B&W files, not un-inverted negatives. If your images are still negatives, enable “Invert input.”</p>
+      </div>
+
+      <div class="section">
+        <label><input id="invert" type="checkbox" /> Invert input images</label>
+        <label><input id="autoContrast" type="checkbox" checked /> Normalize each channel contrast</label>
+        <label><input id="useGreenSize" type="checkbox" checked /> Use green image as canvas size when available</label>
+        <button id="resetAll" class="primary">Reset alignment</button>
+      </div>
+
+      <div class="section">
+        <label>Preview size</label>
+        <select id="previewScale">
+          <option value="0.25">25%</option>
+          <option value="0.5" selected>50%</option>
+          <option value="1">100%</option>
+        </select>
+        <button id="renderFull" class="primary">Render full resolution preview</button>
+      </div>
+
+      <div class="section">
+        <h2 class="layerName">Live nudge</h2>
+        <label>Selected layer</label>
+        <select id="selectedLayer">
+          <option value="blue">Blue layer</option>
+          <option value="red">Red layer</option>
+          <option value="green" selected>Green layer</option>
+        </select>
+        <label>Nudge step, pixels</label>
+        <input id="nudgeStep" type="number" step="0.1" value="1" min="0.1" style="width:90px">
+        <div class="nudgeGrid">
+          <button class="empty" tabindex="-1">.</button><button data-nudge="0,-1">↑</button><button class="empty" tabindex="-1">.</button>
+          <button data-nudge="-1,0">←</button><button id="zeroSelected">0</button><button data-nudge="1,0">→</button>
+          <button class="empty" tabindex="-1">.</button><button data-nudge="0,1">↓</button><button class="empty" tabindex="-1">.</button>
+        </div>
+        <div class="hintBox small">Live preview now redraws while you drag sliders or press nudge buttons. Keyboard: arrow keys nudge the selected layer; hold Shift for 10×. The offsets are in full-resolution pixels, independent of preview size.</div>
+      </div>
+
+      <div class="section">
+        <h2 class="layerName blue">Blue layer alignment</h2>
+        <div class="row"><label>X offset</label><input id="blueXNum" type="number" step="0.1" value="0"></div>
+        <input id="blueX" type="range" min="-300" max="300" step="0.1" value="0">
+        <div class="row"><label>Y offset</label><input id="blueYNum" type="number" step="0.1" value="0"></div>
+        <input id="blueY" type="range" min="-300" max="300" step="0.1" value="0">
+        <div class="row"><label>Scale %</label><input id="blueSNum" type="number" step="0.01" value="100"></div>
+        <input id="blueS" type="range" min="95" max="105" step="0.01" value="100">
+        <div class="row"><label>Rotation °</label><input id="blueRNum" type="number" step="0.01" value="0"></div>
+        <input id="blueR" type="range" min="-3" max="3" step="0.01" value="0">
+      </div>
+
+      <div class="section">
+        <h2 class="layerName red">Red layer alignment</h2>
+        <div class="row"><label>X offset</label><input id="redXNum" type="number" step="0.1" value="0"></div>
+        <input id="redX" type="range" min="-300" max="300" step="0.1" value="0">
+        <div class="row"><label>Y offset</label><input id="redYNum" type="number" step="0.1" value="0"></div>
+        <input id="redY" type="range" min="-300" max="300" step="0.1" value="0">
+        <div class="row"><label>Scale %</label><input id="redSNum" type="number" step="0.01" value="100"></div>
+        <input id="redS" type="range" min="95" max="105" step="0.01" value="100">
+        <div class="row"><label>Rotation °</label><input id="redRNum" type="number" step="0.01" value="0"></div>
+        <input id="redR" type="range" min="-3" max="3" step="0.01" value="0">
+      </div>
+
+      <div class="section">
+        <h2 class="layerName green">Green layer alignment</h2>
+        <div class="row"><label>X offset</label><input id="greenXNum" type="number" step="0.1" value="0"></div>
+        <input id="greenX" type="range" min="-300" max="300" step="0.1" value="0">
+        <div class="row"><label>Y offset</label><input id="greenYNum" type="number" step="0.1" value="0"></div>
+        <input id="greenY" type="range" min="-300" max="300" step="0.1" value="0">
+        <div class="row"><label>Scale %</label><input id="greenSNum" type="number" step="0.01" value="100"></div>
+        <input id="greenS" type="range" min="95" max="105" step="0.01" value="100">
+        <div class="row"><label>Rotation °</label><input id="greenRNum" type="number" step="0.01" value="0"></div>
+        <input id="greenR" type="range" min="-3" max="3" step="0.01" value="0">
+      </div>
+
+      <div class="section">
+        <label>JPEG quality</label>
+        <input id="quality" type="range" min="0.5" max="1" step="0.01" value="0.95">
+        <div class="buttons">
+          <button id="downloadJpeg" disabled>Download JPEG</button>
+          <button id="downloadPng" disabled>Download PNG</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="canvasWrap">
+      <canvas id="out" width="1200" height="900"></canvas>
+    </div>
+  </div>
+
+<script>
+const ids = ["blue", "red", "green"];
+const state = {
+  images: { blue: null, red: null, green: null },
+  transforms: {
+    blue: {x:0,y:0,s:1,r:0},
+    red: {x:0,y:0,s:1,r:0},
+    green: {x:0,y:0,s:1,r:0}
+  },
+  fullResolution: false,
+  renderTimer: null
+};
+
+const canvas = document.getElementById("out");
+const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+function loadImageFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+function requestRender() {
+  if (state.renderTimer) return;
+  state.renderTimer = requestAnimationFrame(() => {
+    state.renderTimer = null;
+    render();
+  });
+}
+
+for (const id of ids) {
+  document.getElementById(id + "File").addEventListener("change", async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    state.images[id] = await loadImageFromFile(file);
+    state.fullResolution = false;
+    render();
+  });
+}
+
+function bindPair(id, prop, scaleIn=1, scaleOut=1) {
+  const slider = document.getElementById(id);
+  const num = document.getElementById(id + "Num");
+  const layer = id.replace(/[XYSR]$/, "");
+  const key = prop;
+  function set(v, from) {
+    const raw = Number(v);
+    if (key === "s") state.transforms[layer][key] = raw / 100;
+    else state.transforms[layer][key] = raw;
+    if (from !== "slider") slider.value = raw;
+    if (from !== "num") num.value = raw;
+    state.fullResolution = false;
+    requestRender();
+  }
+  slider.addEventListener("input", e => set(e.target.value, "slider"));
+  num.addEventListener("input", e => set(e.target.value, "num"));
+}
+
+for (const id of ids) {
+  bindPair(id + "X", "x");
+  bindPair(id + "Y", "y");
+  bindPair(id + "S", "s");
+  bindPair(id + "R", "r");
+}
+
+for (const id of ["invert", "autoContrast", "useGreenSize", "previewScale"]) {
+  document.getElementById(id).addEventListener("change", () => { state.fullResolution = false; requestRender(); });
+}
+
+document.getElementById("renderFull").addEventListener("click", () => { state.fullResolution = true; render(); });
+
+function syncControls(layer) {
+  const t = state.transforms[layer];
+  const vals = { X: t.x, Y: t.y, S: t.s * 100, R: t.r };
+  for (const [suffix, val] of Object.entries(vals)) {
+    const slider = document.getElementById(layer + suffix);
+    const num = document.getElementById(layer + suffix + "Num");
+    if (slider) slider.value = String(val);
+    if (num) num.value = String(Math.round(val * 100) / 100);
+  }
+}
+
+function nudgeSelected(dx, dy, multiplier = 1) {
+  const layer = document.getElementById("selectedLayer").value;
+  const step = Number(document.getElementById("nudgeStep").value) || 1;
+  state.transforms[layer].x += dx * step * multiplier;
+  state.transforms[layer].y += dy * step * multiplier;
+  syncControls(layer);
+  state.fullResolution = false;
+  requestRender();
+}
+
+document.querySelectorAll("[data-nudge]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const [dx, dy] = btn.dataset.nudge.split(",").map(Number);
+    nudgeSelected(dx, dy, 1);
+  });
+});
+
+document.getElementById("zeroSelected").addEventListener("click", () => {
+  const layer = document.getElementById("selectedLayer").value;
+  state.transforms[layer].x = 0;
+  state.transforms[layer].y = 0;
+  syncControls(layer);
+  state.fullResolution = false;
+  requestRender();
+});
+
+window.addEventListener("keydown", (e) => {
+  const tag = document.activeElement?.tagName?.toLowerCase();
+  if (["input", "select", "textarea"].includes(tag)) return;
+  const map = { ArrowLeft: [-1,0], ArrowRight: [1,0], ArrowUp: [0,-1], ArrowDown: [0,1] };
+  if (!(e.key in map)) return;
+  e.preventDefault();
+  const [dx, dy] = map[e.key];
+  nudgeSelected(dx, dy, e.shiftKey ? 10 : 1);
+});
+document.getElementById("resetAll").addEventListener("click", () => {
+  for (const layer of ids) {
+    for (const [suffix, val] of [["X",0],["Y",0],["S",100],["R",0]]) {
+      document.getElementById(layer + suffix).value = val;
+      document.getElementById(layer + suffix + "Num").value = val;
+    }
+    state.transforms[layer] = {x:0,y:0,s:1,r:0};
+  }
+  state.fullResolution = false;
+  render();
+});
+
+function getOutputSize() {
+  const loaded = ids.map(id => state.images[id]).filter(Boolean);
+  if (!loaded.length) return {w:1200, h:900, previewScale:1};
+  const green = state.images.green;
+  const base = document.getElementById("useGreenSize").checked && green ? green : loaded[0];
+  const p = state.fullResolution ? 1 : Number(document.getElementById("previewScale").value);
+  return { w: Math.max(1, Math.round(base.naturalWidth * p)), h: Math.max(1, Math.round(base.naturalHeight * p)), previewScale: p };
+}
+
+function drawTransformedImage(img, t, w, h, p) {
+  const tmp = document.createElement("canvas");
+  tmp.width = w;
+  tmp.height = h;
+  const c = tmp.getContext("2d", { willReadFrequently: true });
+  c.save();
+  c.translate(w/2 + t.x * p, h/2 + t.y * p);
+  c.rotate(t.r * Math.PI / 180);
+  c.scale(t.s, t.s);
+  const drawW = img.naturalWidth * p;
+  const drawH = img.naturalHeight * p;
+  c.drawImage(img, -drawW/2, -drawH/2, drawW, drawH);
+  c.restore();
+  return c.getImageData(0, 0, w, h);
+}
+
+function luminance(data, i) {
+  return 0.2126 * data[i] + 0.7152 * data[i+1] + 0.0722 * data[i+2];
+}
+
+function channelValues(imageData, invert, normalize) {
+  const d = imageData.data;
+  const out = new Float32Array(d.length / 4);
+  let lo = 255, hi = 0;
+  for (let i=0, j=0; i<d.length; i+=4, j++) {
+    let v = d[i+3] === 0 ? 0 : luminance(d, i);
+    if (invert) v = 255 - v;
+    out[j] = v;
+    if (d[i+3] > 0) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  }
+  if (normalize && hi > lo + 1) {
+    const span = hi - lo;
+    for (let j=0; j<out.length; j++) out[j] = Math.max(0, Math.min(255, (out[j]-lo) * 255 / span));
+  }
+  return out;
+}
+
+function render() {
+  const {w, h, previewScale} = getOutputSize();
+  canvas.width = w; canvas.height = h;
+  ctx.clearRect(0,0,w,h);
+
+  const loaded = ids.filter(id => state.images[id]);
+  if (!loaded.length) {
+    ctx.fillStyle = "#222"; ctx.fillRect(0,0,w,h);
+    ctx.fillStyle = "#eee"; ctx.font = "24px system-ui"; ctx.fillText("Load blue, red, and green B&W images", 32, 56);
+    document.getElementById("downloadJpeg").disabled = true;
+    document.getElementById("downloadPng").disabled = true;
+    return;
+  }
+
+  const invert = document.getElementById("invert").checked;
+  const normalize = document.getElementById("autoContrast").checked;
+  const channels = { red:null, green:null, blue:null };
+
+  for (const id of ids) {
+    if (!state.images[id]) continue;
+    const transformed = drawTransformedImage(state.images[id], state.transforms[id], w, h, previewScale);
+    channels[id] = channelValues(transformed, invert, normalize);
+  }
+
+  const out = ctx.createImageData(w,h);
+  const d = out.data;
+  const px = w*h;
+  for (let j=0, i=0; j<px; j++, i+=4) {
+    d[i]   = channels.red   ? channels.red[j]   : 0;
+    d[i+1] = channels.green ? channels.green[j] : 0;
+    d[i+2] = channels.blue  ? channels.blue[j]  : 0;
+    d[i+3] = 255;
+  }
+  ctx.putImageData(out, 0, 0);
+  document.getElementById("downloadJpeg").disabled = !(channels.red && channels.green && channels.blue);
+  document.getElementById("downloadPng").disabled = !(channels.red && channels.green && channels.blue);
+}
+
+function download(dataUrl, filename) {
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = filename;
+  a.click();
+}
+
+document.getElementById("downloadJpeg").addEventListener("click", () => {
+  state.fullResolution = true;
+  render();
+  const q = Number(document.getElementById("quality").value);
+  download(canvas.toDataURL("image/jpeg", q), "trichrome.jpg");
+});
+
+document.getElementById("downloadPng").addEventListener("click", () => {
+  state.fullResolution = true;
+  render();
+  download(canvas.toDataURL("image/png"), "trichrome.png");
+});
+
+render();
+</script>
+</body>
+</html>
